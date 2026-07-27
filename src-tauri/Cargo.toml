@@ -1,0 +1,28 @@
+[package]
+name = "portcontrol"
+version = "0.2.0"
+description = "Cross-platform local port and development service manager"
+authors = ["PortControl contributors"]
+edition = "2024"
+rust-version = "1.88"
+
+[lib]
+name = "portcontrol_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+netstat2 = "0.11.2"
+serde = { version = "1", features = ["derive"] }
+sysinfo = "0.37.2"
+tauri = { version = "2.11.5", features = [] }
+thiserror = "2"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
