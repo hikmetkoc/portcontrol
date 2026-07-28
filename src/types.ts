@@ -30,6 +30,7 @@ export interface PortBinding {
   role: SocketRole;
   roleReason: string;
   confidence: ClassificationConfidence;
+  accessUrls: string[];
 }
 
 export interface ProcessAncestor {
@@ -46,6 +47,11 @@ export interface ProcessPortGroup {
   workingDirectory: string | null;
   parentChain: ProcessAncestor[];
   ports: PortBinding[];
+  technology: string;
+  projectName: string | null;
+  projectRoot: string | null;
+  serviceKind: string;
+  serviceDescription: string;
   category: ProcessCategory;
   knownDeveloperTool: boolean;
   protected: boolean;
@@ -80,6 +86,20 @@ export interface StopResult {
   processName: string;
   stopped: boolean;
   message: string;
+}
+
+export interface ProjectGroupMember {
+  id: string;
+  label: string;
+  protocol: Protocol;
+  port: number;
+}
+
+export interface ProjectGroup {
+  id: string;
+  name: string;
+  createdAt: number;
+  members: ProjectGroupMember[];
 }
 
 export type CategoryFilter = "all" | "developer" | ProcessCategory;

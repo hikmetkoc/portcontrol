@@ -5,22 +5,33 @@ const commonMetrics = {
   protectionReason: null,
   metricsReady: true,
   startedAt: 1753103102,
+  technology: "Bilinmiyor",
+  projectName: null,
+  projectRoot: null,
+  serviceKind: "Uygulama servisi",
+  serviceDescription: "Süreç bilgisine göre gösteriliyor.",
 };
 
 const processes: ProcessPortGroup[] = [
   {
     ...commonMetrics,
-    pid: 18432,
+    pid: 41256,
     processName: "node.exe",
-    displayName: "JavaScript runtime",
+    displayName: "Meteor Panel",
     executablePath: "C:\\Program Files\\nodejs\\node.exe",
-    command: "node.exe vite --host 0.0.0.0",
-    workingDirectory: "D:\\development\\demo-dashboard",
+    command: "node.exe @angular\\cli\\bin\\ng.js serve --host 0.0.0.0 --port 4200",
+    workingDirectory: "D:\\development\\meteor-panel\\frontend",
+    technology: "Angular",
+    projectName: "Meteor Panel",
+    projectRoot: "D:\\development\\meteor-panel\\frontend",
+    serviceKind: "Frontend",
+    serviceDescription:
+      "Meteor Panel projesinin Frontend bileşeni · Angular olarak algılandı.",
     parentChain: [
       { pid: 25700, name: "Code" },
       { pid: 14320, name: "explorer" },
     ],
-    category: "runtime",
+    category: "development",
     knownDeveloperTool: true,
     memoryBytes: 148_897_792,
     cpuUsagePercent: 3.7,
@@ -32,7 +43,7 @@ const processes: ProcessPortGroup[] = [
       {
         protocol: "TCP",
         address: "0.0.0.0",
-        port: 5173,
+        port: 4200,
         remoteAddress: null,
         remotePort: null,
         exposure: "all",
@@ -42,6 +53,10 @@ const processes: ProcessPortGroup[] = [
         roleReason:
           "Komut satırı veya süreç ağacında geliştirme sunucusu işareti bulundu.",
         confidence: "high",
+        accessUrls: [
+          "http://localhost:4200",
+          "http://192.168.1.9:4200",
+        ],
       },
       {
         protocol: "TCP",
@@ -56,6 +71,7 @@ const processes: ProcessPortGroup[] = [
         roleReason:
           "Bu bir dinleme portu değil; süreç başka bir uçla aktif TCP bağlantısı kurmuş.",
         confidence: "high",
+        accessUrls: [],
       },
     ],
   },
@@ -71,6 +87,9 @@ const processes: ProcessPortGroup[] = [
     workingDirectory: null,
     parentChain: [{ pid: 14320, name: "explorer" }],
     category: "editor",
+    technology: "VS Code",
+    serviceKind: "Geliştirme aracı",
+    serviceDescription: "VS Code yardımcı servisi.",
     knownDeveloperTool: true,
     memoryBytes: 205_520_896,
     cpuUsagePercent: 0.6,
@@ -92,6 +111,7 @@ const processes: ProcessPortGroup[] = [
         roleReason:
           "Komut satırı bunun IDE/editör yardımcı veya eklenti süreci olduğunu gösteriyor.",
         confidence: "high",
+        accessUrls: [],
       },
     ],
   },
@@ -106,6 +126,9 @@ const processes: ProcessPortGroup[] = [
     workingDirectory: "D:\\development\\demo-dashboard",
     parentChain: [{ pid: 25700, name: "Code" }],
     category: "editor",
+    technology: "VS Code",
+    serviceKind: "Geliştirme aracı",
+    serviceDescription: "VS Code eklenti servisi.",
     knownDeveloperTool: true,
     memoryBytes: 122_683_392,
     cpuUsagePercent: 0.2,
@@ -127,6 +150,7 @@ const processes: ProcessPortGroup[] = [
         roleReason:
           "Komut satırı bunun IDE/editör yardımcı veya eklenti süreci olduğunu gösteriyor.",
         confidence: "high",
+        accessUrls: [],
       },
     ],
   },
@@ -141,6 +165,9 @@ const processes: ProcessPortGroup[] = [
     workingDirectory: "C:\\Program Files\\PostgreSQL\\17\\bin",
     parentChain: [{ pid: 1032, name: "services" }],
     category: "database",
+    technology: "PostgreSQL",
+    serviceKind: "Veritabanı",
+    serviceDescription: "PostgreSQL veritabanı servisi.",
     knownDeveloperTool: true,
     memoryBytes: 74_448_896,
     cpuUsagePercent: 1.1,
@@ -162,6 +189,7 @@ const processes: ProcessPortGroup[] = [
         roleReason:
           "Tanınan veritabanı veya konteyner altyapısı tarafından açılmış servis portu.",
         confidence: "high",
+        accessUrls: [],
       },
     ],
   },
@@ -176,6 +204,9 @@ const processes: ProcessPortGroup[] = [
     workingDirectory: null,
     parentChain: [{ pid: 19024, name: "Docker Desktop" }],
     category: "container",
+    technology: "Docker",
+    serviceKind: "Konteyner altyapısı",
+    serviceDescription: "Docker Desktop altyapı servisi.",
     knownDeveloperTool: true,
     memoryBytes: 318_767_104,
     cpuUsagePercent: 2.8,
@@ -197,6 +228,7 @@ const processes: ProcessPortGroup[] = [
         roleReason:
           "Tanınan veritabanı veya konteyner altyapısı tarafından açılmış servis portu.",
         confidence: "high",
+        accessUrls: [],
       },
       {
         protocol: "UDP",
@@ -211,6 +243,7 @@ const processes: ProcessPortGroup[] = [
         roleReason:
           "Tanınan veritabanı veya konteyner altyapısı tarafından açılmış servis portu.",
         confidence: "high",
+        accessUrls: [],
       },
     ],
   },
@@ -225,6 +258,9 @@ const processes: ProcessPortGroup[] = [
     workingDirectory: null,
     parentChain: [{ pid: 5280, name: "avp" }],
     category: "system",
+    technology: "Güvenlik yazılımı",
+    serviceKind: "Sistem servisi",
+    serviceDescription: "Korunan güvenlik yazılımı süreci.",
     knownDeveloperTool: false,
     protected: true,
     protectionReason: "Antivirüs veya güvenlik yazılımı süreci",
@@ -248,6 +284,7 @@ const processes: ProcessPortGroup[] = [
         roleReason:
           "İşletim sistemi veya güvenlik yazılımının yönettiği uç nokta.",
         confidence: "high",
+        accessUrls: [],
       },
     ],
   },

@@ -1,7 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
-    net::IpAddr,
-    path::Path,
+    fs,
+    net::{IpAddr, UdpSocket},
+    path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -77,6 +78,7 @@ pub struct PortBinding {
     role: &'static str,
     role_reason: String,
     confidence: &'static str,
+    access_urls: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,6 +99,11 @@ pub struct ProcessPortGroup {
     working_directory: Option<String>,
     parent_chain: Vec<ProcessAncestor>,
     ports: Vec<PortBinding>,
+    technology: String,
+    project_name: Option<String>,
+    project_root: Option<String>,
+    service_kind: String,
+    service_description: String,
     category: &'static str,
     known_developer_tool: bool,
     protected: bool,
@@ -223,6 +230,7 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
         .process(Pid::from_u32(std::process::id()))
         .and_then(|process| process.user_id())
         .cloned();
+    let local_addresses = discover_local_addresses();
 
     let mut processes = Vec::with_capacity(grouped.len());
     let mut hidden_system_processes = 0;
@@ -243,11 +251,21 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
             .and_then(|item| item.cwd())
             .map(|path| path.to_string_lossy().into_owned());
         let parent_chain = process_ancestors(system, pid);
-        let identity = identify_process(
+        let project = inspect_project(
+            &process_name,
+            executable_path.as_deref(),
+            command.as_deref(),
+            working_directory.as_deref(),
+        );
+        let mut identity = identify_process(
             &process_name,
             executable_path.as_deref(),
             command.as_deref(),
         );
+        if project.recognized {
+            identity.category = "development";
+            identity.known_developer_tool = true;
+        }
         let owned_by_another_user = match (
             process.and_then(|item| item.user_id()),
             current_user_id.as_ref(),
@@ -284,6 +302,7 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
             .drain(..)
             .map(|binding| {
                 let role = classify_socket(&binding, &identity, &classification_context, protected);
+                let access_urls = access_urls_for(&binding, role.role, &project, &local_addresses);
                 PortBinding {
                     protocol: binding.protocol,
                     address: binding.address,
@@ -296,6 +315,7 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
                     role: role.role,
                     role_reason: role.reason.into(),
                     confidence: role.confidence,
+                    access_urls,
                 }
             })
             .collect::<Vec<_>>();
@@ -309,15 +329,26 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
         });
 
         let disk_usage = process.map(|item| item.disk_usage()).unwrap_or_default();
+        let display_name = project
+            .project_name
+            .clone()
+            .unwrap_or(identity.display_name);
         processes.push(ProcessPortGroup {
             pid: pid_value,
             process_name,
-            display_name: identity.display_name,
+            display_name,
             executable_path,
             command,
             working_directory,
             parent_chain,
             ports: bindings,
+            technology: project.technology,
+            project_name: project.project_name,
+            project_root: project
+                .project_root
+                .map(|path| path.to_string_lossy().into_owned()),
+            service_kind: project.service_kind,
+            service_description: project.service_description,
             category: if protected {
                 "system"
             } else {
@@ -478,6 +509,249 @@ struct SocketClassification {
     role: &'static str,
     reason: &'static str,
     confidence: &'static str,
+}
+
+#[derive(Debug, Clone)]
+struct ProjectIdentity {
+    technology: String,
+    project_name: Option<String>,
+    project_root: Option<PathBuf>,
+    service_kind: String,
+    service_description: String,
+    recognized: bool,
+    likely_http: bool,
+}
+
+fn inspect_project(
+    process_name: &str,
+    executable: Option<&str>,
+    command: Option<&str>,
+    working_directory: Option<&str>,
+) -> ProjectIdentity {
+    let process_context = format!(
+        "{} {} {}",
+        process_name,
+        executable.unwrap_or_default(),
+        command.unwrap_or_default()
+    )
+    .to_lowercase();
+    let project_root = working_directory.map(Path::new).and_then(find_project_root);
+    let manifest_context = project_root
+        .as_deref()
+        .map(project_manifest_context)
+        .unwrap_or_default();
+    let context = format!("{process_context} {manifest_context}");
+
+    let has_tauri = matches_any(&context, &["@tauri-apps", "tauri::", "tauri-build"])
+        || project_root
+            .as_deref()
+            .is_some_and(|root| root.join("src-tauri").is_dir());
+    let has_angular = matches_any(
+        &context,
+        &["@angular/core", "@angular/cli", "ng serve", "angular.json"],
+    ) || project_root
+        .as_deref()
+        .is_some_and(|root| root.join("angular.json").is_file());
+    let has_react = matches_any(
+        &context,
+        &[
+            "\"react\"",
+            "react-scripts",
+            "@vitejs/plugin-react",
+            "next dev",
+            "next-server",
+        ],
+    );
+    let has_vue = matches_any(
+        &context,
+        &["\"vue\"", "@vitejs/plugin-vue", "vue-cli-service", "nuxt"],
+    );
+    let has_flutter = matches_any(&context, &["flutter", "dart.exe", "dart run"])
+        || project_root
+            .as_deref()
+            .is_some_and(|root| root.join("pubspec.yaml").is_file());
+    let has_spring = matches_any(
+        &context,
+        &[
+            "spring-boot",
+            "org.springframework",
+            "springframework.boot",
+            "bootrun",
+        ],
+    );
+    let has_dotnet = matches_any(&context, &["dotnet", ".csproj", "aspnetcore"])
+        || project_root.as_deref().is_some_and(has_csproj);
+    let has_python = matches_any(
+        &context,
+        &[
+            "python.exe",
+            "python3",
+            "uvicorn",
+            "gunicorn",
+            "flask",
+            "django",
+            "fastapi",
+            "pyproject.toml",
+        ],
+    );
+    let has_rust = matches_any(&context, &["cargo run", "cargo.exe", "rustc"])
+        || project_root
+            .as_deref()
+            .is_some_and(|root| root.join("Cargo.toml").is_file());
+    let has_java = matches_any(
+        &context,
+        &[
+            "java.exe",
+            "javaw.exe",
+            "maven",
+            "mvnw",
+            "gradlew",
+            "pom.xml",
+            "build.gradle",
+            ".jar",
+        ],
+    );
+    let has_javascript = matches_any(
+        &context,
+        &[
+            "node.exe",
+            "node ",
+            "deno",
+            "bun",
+            "package.json",
+            "vite",
+            "webpack",
+        ],
+    );
+
+    let (technology, service_kind, technology_recognized, likely_http) = if has_tauri {
+        let frontend = if has_angular {
+            " + Angular"
+        } else if has_react {
+            " + React"
+        } else if has_vue {
+            " + Vue"
+        } else {
+            ""
+        };
+        (
+            format!("Tauri{frontend}"),
+            "Masaüstü uygulaması",
+            true,
+            has_angular || has_react || has_vue,
+        )
+    } else if has_angular {
+        ("Angular".into(), "Frontend", true, true)
+    } else if has_react {
+        ("React".into(), "Frontend", true, true)
+    } else if has_vue {
+        ("Vue".into(), "Frontend", true, true)
+    } else if has_flutter {
+        ("Flutter".into(), "Mobil / masaüstü", true, false)
+    } else if has_spring {
+        ("Spring Boot".into(), "Backend / API", true, true)
+    } else if has_dotnet {
+        (
+            ".NET".into(),
+            if matches_any(&context, &["aspnet", "kestrel", "webapplication"]) {
+                "Backend / API"
+            } else {
+                "Uygulama servisi"
+            },
+            true,
+            matches_any(&context, &["aspnet", "kestrel", "http"]),
+        )
+    } else if has_python {
+        (
+            "Python".into(),
+            if matches_any(
+                &context,
+                &["uvicorn", "gunicorn", "flask", "django", "fastapi"],
+            ) {
+                "Backend / API"
+            } else {
+                "Uygulama servisi"
+            },
+            true,
+            has_project_server_marker(&context),
+        )
+    } else if has_rust {
+        (
+            "Rust".into(),
+            if has_project_server_marker(&context)
+                || matches_any(&context, &["actix", "axum", "rocket", "warp"])
+            {
+                "Backend / API"
+            } else {
+                "Uygulama servisi"
+            },
+            true,
+            has_project_server_marker(&context)
+                || matches_any(&context, &["actix", "axum", "rocket", "warp"]),
+        )
+    } else if has_java {
+        (
+            "Java".into(),
+            if has_project_server_marker(&context) {
+                "Backend / API"
+            } else {
+                "Uygulama servisi"
+            },
+            true,
+            has_project_server_marker(&context),
+        )
+    } else if has_javascript {
+        (
+            "JavaScript".into(),
+            if has_project_server_marker(&context) {
+                "Web uygulaması"
+            } else {
+                "JavaScript servisi"
+            },
+            true,
+            has_project_server_marker(&context),
+        )
+    } else if matches_any(&context, &["postgres", "postmaster"]) {
+        ("PostgreSQL".into(), "Veritabanı", false, false)
+    } else if matches_any(&context, &["sqlservr", "mssql"]) {
+        ("Microsoft SQL Server".into(), "Veritabanı", false, false)
+    } else if matches_any(&context, &["mysqld", "mariadbd"]) {
+        ("MySQL / MariaDB".into(), "Veritabanı", false, false)
+    } else if matches_any(&context, &["mongod", "mongodb"]) {
+        ("MongoDB".into(), "Veritabanı", false, false)
+    } else if matches_any(&context, &["redis-server", "redis-server.exe"]) {
+        ("Redis".into(), "Veritabanı", false, false)
+    } else {
+        (
+            clean_process_name(process_name),
+            "Uygulama servisi",
+            false,
+            false,
+        )
+    };
+
+    let project_name = project_root.as_deref().and_then(read_project_name);
+    let recognized = technology_recognized
+        && (project_root.is_some() || has_project_server_marker(&process_context));
+    let service_description = match project_name.as_deref() {
+        Some(name) => {
+            format!("{name} projesinin {service_kind} bileşeni · {technology} olarak algılandı.")
+        }
+        None if technology_recognized => {
+            format!("{technology} tabanlı {service_kind} olarak algılandı.")
+        }
+        None => "Proje manifesti bulunamadı; süreç bilgisine göre gösteriliyor.".into(),
+    };
+
+    ProjectIdentity {
+        technology,
+        project_name,
+        project_root,
+        service_kind: service_kind.into(),
+        service_description,
+        recognized,
+        likely_http: likely_http || has_project_server_marker(&context),
+    }
 }
 
 fn identify_process(
@@ -794,6 +1068,8 @@ fn has_project_server_marker(context: &str) -> bool {
             "next-server",
             "nuxt",
             "ng serve",
+            "ng.js serve",
+            "@angular/cli",
             "react-scripts",
             "live-server",
             "ritwickdey.liveserver",
@@ -952,6 +1228,303 @@ fn clean_process_name(name: &str) -> String {
         .to_string()
 }
 
+fn find_project_root(start: &Path) -> Option<PathBuf> {
+    let start = if start.is_file() {
+        start.parent()?
+    } else {
+        start
+    };
+    start
+        .ancestors()
+        .take(7)
+        .find(|candidate| {
+            [
+                "package.json",
+                "angular.json",
+                "Cargo.toml",
+                "pom.xml",
+                "build.gradle",
+                "build.gradle.kts",
+                "pyproject.toml",
+                "requirements.txt",
+                "pubspec.yaml",
+            ]
+            .iter()
+            .any(|marker| candidate.join(marker).is_file())
+                || candidate.join("src-tauri").is_dir()
+                || has_csproj(candidate)
+        })
+        .map(Path::to_path_buf)
+}
+
+fn has_csproj(root: &Path) -> bool {
+    fs::read_dir(root).ok().is_some_and(|entries| {
+        entries.flatten().take(250).any(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("csproj"))
+        })
+    })
+}
+
+fn project_manifest_context(root: &Path) -> String {
+    let mut contents = Vec::new();
+    for relative in [
+        "package.json",
+        "angular.json",
+        "Cargo.toml",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "settings.gradle",
+        "settings.gradle.kts",
+        "pyproject.toml",
+        "requirements.txt",
+        "pubspec.yaml",
+    ] {
+        if let Some(content) = read_small_text(&root.join(relative), 512 * 1024) {
+            contents.push(relative.to_string());
+            contents.push(content);
+        }
+    }
+
+    if has_csproj(root)
+        && let Ok(entries) = fs::read_dir(root)
+    {
+        for entry in entries.flatten().take(250) {
+            let path = entry.path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("csproj"))
+                && let Some(content) = read_small_text(&path, 512 * 1024)
+            {
+                contents.push(path.to_string_lossy().into_owned());
+                contents.push(content);
+                break;
+            }
+        }
+    }
+
+    contents.join(" ").to_lowercase()
+}
+
+fn read_small_text(path: &Path, max_bytes: u64) -> Option<String> {
+    let metadata = fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > max_bytes {
+        return None;
+    }
+    fs::read_to_string(path).ok()
+}
+
+fn read_project_name(root: &Path) -> Option<String> {
+    let mut name = read_package_name(root)
+        .or_else(|| read_toml_project_name(&root.join("Cargo.toml")))
+        .or_else(|| read_toml_project_name(&root.join("pyproject.toml")))
+        .or_else(|| read_pubspec_name(&root.join("pubspec.yaml")))
+        .or_else(|| read_xml_tag(&root.join("pom.xml"), "artifactId"))
+        .or_else(|| read_gradle_project_name(root))
+        .or_else(|| read_csproj_name(root))
+        .or_else(|| {
+            root.file_name()
+                .map(|value| value.to_string_lossy().into_owned())
+        })?;
+
+    if matches!(
+        name.to_lowercase().as_str(),
+        "frontend" | "front-end" | "client" | "web" | "app" | "backend" | "server" | "api"
+    ) && let Some(parent_name) = root
+        .parent()
+        .and_then(Path::file_name)
+        .map(|value| value.to_string_lossy().into_owned())
+    {
+        name = parent_name;
+    }
+
+    Some(humanize_project_name(&name))
+}
+
+fn read_package_name(root: &Path) -> Option<String> {
+    let content = read_small_text(&root.join("package.json"), 512 * 1024)?;
+    let json = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+    json.get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(|name| name.rsplit('/').next().unwrap_or(name).to_string())
+}
+
+fn read_toml_project_name(path: &Path) -> Option<String> {
+    let content = read_small_text(path, 512 * 1024)?;
+    let mut in_project_section = false;
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.starts_with('[') {
+            in_project_section = matches!(
+                line,
+                "[package]" | "[project]" | "[tool.poetry]" | "[workspace.package]"
+            );
+            continue;
+        }
+        if in_project_section
+            && let Some(value) = line.strip_prefix("name")
+            && let Some(value) = value.trim_start().strip_prefix('=')
+        {
+            return Some(value.trim().trim_matches(['"', '\'']).to_string());
+        }
+    }
+    None
+}
+
+fn read_pubspec_name(path: &Path) -> Option<String> {
+    let content = read_small_text(path, 512 * 1024)?;
+    content.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("name:")
+            .map(|value| value.trim().trim_matches(['"', '\'']).to_string())
+    })
+}
+
+fn read_xml_tag(path: &Path, tag: &str) -> Option<String> {
+    let content = read_small_text(path, 1024 * 1024)?;
+    let start_tag = format!("<{tag}>");
+    let end_tag = format!("</{tag}>");
+    let start = content.find(&start_tag)? + start_tag.len();
+    let end = content[start..].find(&end_tag)? + start;
+    Some(content[start..end].trim().to_string())
+}
+
+fn read_gradle_project_name(root: &Path) -> Option<String> {
+    for file in ["settings.gradle", "settings.gradle.kts"] {
+        let Some(content) = read_small_text(&root.join(file), 512 * 1024) else {
+            continue;
+        };
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if let Some(value) = trimmed.strip_prefix("rootProject.name") {
+                let value = value
+                    .trim_start()
+                    .strip_prefix('=')
+                    .unwrap_or(value)
+                    .trim()
+                    .trim_matches(['"', '\'']);
+                if !value.is_empty() {
+                    return Some(value.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn read_csproj_name(root: &Path) -> Option<String> {
+    let entries = fs::read_dir(root).ok()?;
+    for entry in entries.flatten().take(250) {
+        let path = entry.path();
+        if !path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("csproj"))
+        {
+            continue;
+        }
+        if let Some(name) = read_xml_tag(&path, "AssemblyName") {
+            return Some(name);
+        }
+        return path
+            .file_stem()
+            .map(|value| value.to_string_lossy().into_owned());
+    }
+    None
+}
+
+fn humanize_project_name(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(['"', '\''])
+        .split(['-', '_'])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut characters = part.chars();
+            match characters.next() {
+                Some(first) => {
+                    format!("{}{}", first.to_uppercase(), characters.collect::<String>())
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn access_urls_for(
+    binding: &RawBinding,
+    role: &str,
+    project: &ProjectIdentity,
+    local_addresses: &[String],
+) -> Vec<String> {
+    if binding.protocol != "TCP"
+        || binding.activity != "listener"
+        || role != "published"
+        || !project.likely_http
+    {
+        return Vec::new();
+    }
+
+    let scheme = if matches!(binding.port, 443 | 8443) {
+        "https"
+    } else {
+        "http"
+    };
+    let mut urls = Vec::new();
+    match binding.exposure {
+        "local" => {
+            urls.push(format!("{scheme}://localhost:{}", binding.port));
+        }
+        "all" => {
+            urls.push(format!("{scheme}://localhost:{}", binding.port));
+            for address in local_addresses {
+                urls.push(format_url(scheme, address, binding.port));
+            }
+        }
+        "network" => {
+            urls.push(format_url(scheme, &binding.address, binding.port));
+        }
+        _ => {}
+    }
+    urls.sort();
+    urls.dedup();
+    urls
+}
+
+fn format_url(scheme: &str, address: &str, port: u16) -> String {
+    if address.contains(':') {
+        format!("{scheme}://[{address}]:{port}")
+    } else {
+        format!("{scheme}://{address}:{port}")
+    }
+}
+
+fn discover_local_addresses() -> Vec<String> {
+    let mut addresses = Vec::new();
+    if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+        let _ = socket.connect("8.8.8.8:80");
+        if let Ok(address) = socket.local_addr()
+            && !address.ip().is_loopback()
+            && !address.ip().is_unspecified()
+        {
+            addresses.push(address.ip().to_string());
+        }
+    }
+    if let Ok(socket) = UdpSocket::bind("[::]:0") {
+        let _ = socket.connect("[2001:4860:4860::8888]:80");
+        if let Ok(address) = socket.local_addr()
+            && !address.ip().is_loopback()
+            && !address.ip().is_unspecified()
+        {
+            addresses.push(address.ip().to_string());
+        }
+    }
+    addresses
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1042,6 +1615,51 @@ mod tests {
         assert_eq!(exposure_for("0.0.0.0".parse().unwrap()), "all");
         assert_eq!(exposure_for("192.168.1.50".parse().unwrap()), "network");
         assert_eq!(exposure_for("::1".parse().unwrap()), "local");
+    }
+
+    #[test]
+    fn recognizes_requested_project_technologies() {
+        let angular = inspect_project(
+            "node.exe",
+            None,
+            Some("node @angular/cli/bin/ng.js serve --host 0.0.0.0"),
+            None,
+        );
+        assert_eq!(angular.technology, "Angular");
+        assert_eq!(angular.service_kind, "Frontend");
+        assert!(angular.recognized);
+        assert!(angular.likely_http);
+
+        let spring = inspect_project(
+            "java.exe",
+            None,
+            Some("java org.springframework.boot.loader.launch.JarLauncher"),
+            None,
+        );
+        assert_eq!(spring.technology, "Spring Boot");
+        assert_eq!(spring.service_kind, "Backend / API");
+    }
+
+    #[test]
+    fn builds_local_and_lan_urls_for_exposed_http_projects() {
+        let project = inspect_project(
+            "node.exe",
+            None,
+            Some("node @angular/cli/bin/ng.js serve --host 0.0.0.0"),
+            None,
+        );
+        let mut binding = test_binding(4200, "listener");
+        binding.address = "0.0.0.0".into();
+        binding.exposure = "all";
+        let urls = access_urls_for(&binding, "published", &project, &["192.168.1.9".into()]);
+
+        assert_eq!(
+            urls,
+            vec![
+                "http://192.168.1.9:4200".to_string(),
+                "http://localhost:4200".to_string()
+            ]
+        );
     }
 
     #[test]

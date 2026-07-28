@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { mockScanResponse } from "./mockData";
 import type { ScanResponse, StopRequest, StopResult } from "./types";
 
@@ -38,4 +39,18 @@ export async function stopProcesses(
   }
 
   return invoke<StopResult[]>("stop_processes", { requests, force });
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  const parsed = new URL(url);
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Yalnızca HTTP ve HTTPS adresleri açılabilir.");
+  }
+
+  if (!isTauriRuntime()) {
+    window.open(parsed.href, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  await openUrl(parsed.href);
 }

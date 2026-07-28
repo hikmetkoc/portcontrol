@@ -12,6 +12,7 @@ import {
   Network,
   RadioTower,
   RefreshCw,
+  RotateCcw,
   Search,
   Server,
   Sparkles,
@@ -22,9 +23,35 @@ import { scanPorts, stopProcesses } from "./api";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { Logo } from "./components/Logo";
 import { ProcessCard } from "./components/ProcessCard";
+import {
+  ProjectPortDialog,
+  type AddProjectPortInput,
+  type ProjectPortSelection,
+} from "./components/ProjectPortDialog";
+import { ProjectGroups } from "./components/ProjectGroups";
 import { StatCard } from "./components/StatCard";
+import {
+  addProjectMember,
+  loadProjectGroups,
+  memberId,
+  newProjectGroup,
+  removeProjectMember,
+  renameProjectGroup,
+  renameProjectMember,
+  saveProjectGroups,
+} from "./projectGroups";
+import {
+  hiddenPortRecord,
+  loadCollapsedPortKeys,
+  loadHiddenPorts,
+  portViewKey,
+  saveCollapsedPortKeys,
+  saveHiddenPorts,
+} from "./portVisibility";
 import type {
   CategoryFilter,
+  PortBinding,
+  ProcessPortGroup,
   Protocol,
   RoleFilter,
   ScanResponse,
@@ -46,6 +73,7 @@ const categoryOptions: Array<{ label: string; value: CategoryFilter }> = [
   { label: "Editörler", value: "editor" },
   { label: "Veritabanları", value: "database" },
   { label: "Konteynerler", value: "container" },
+  { label: "Geliştirme projeleri", value: "development" },
   { label: "Çalışma zamanları", value: "runtime" },
   { label: "Diğer", value: "other" },
   { label: "Sistem", value: "system" },
@@ -90,6 +118,15 @@ export default function App() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [projectGroups, setProjectGroups] = useState(loadProjectGroups);
+  const [hiddenPorts, setHiddenPorts] = useState(loadHiddenPorts);
+  const [collapsedPortKeys, setCollapsedPortKeys] = useState(
+    () => new Set(loadCollapsedPortKeys()),
+  );
+  const [projectPortDialog, setProjectPortDialog] = useState<{
+    initialSelection: ProjectPortSelection | null;
+    preselectedGroupId: string | null;
+  } | null>(null);
   const requestId = useRef(0);
 
   const refresh = useCallback(
@@ -135,6 +172,18 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => {
+    saveProjectGroups(projectGroups);
+  }, [projectGroups]);
+
+  useEffect(() => {
+    saveHiddenPorts(hiddenPorts);
+  }, [hiddenPorts]);
+
+  useEffect(() => {
+    saveCollapsedPortKeys([...collapsedPortKeys]);
+  }, [collapsedPortKeys]);
+
   const visibleProcesses = useMemo(
     () =>
       filterProcesses(
@@ -146,6 +195,42 @@ export default function App() {
         role,
       ),
     [scan?.processes, search, category, protocol, socketView, role],
+  );
+  const hiddenPortKeys = useMemo(
+    () => new Set(hiddenPorts.map((record) => record.key)),
+    [hiddenPorts],
+  );
+  const groupedMemberIds = useMemo(
+    () =>
+      new Set(
+        projectGroups.flatMap((group) =>
+          group.members.map((member) => member.id),
+        ),
+      ),
+    [projectGroups],
+  );
+  const ungroupedProcesses = useMemo(
+    () =>
+      visibleProcesses
+        .map((process) => ({
+          ...process,
+          ports: process.ports.filter(
+            (port) =>
+              port.activity === "connection" ||
+              !groupedMemberIds.has(memberId(port.protocol, port.port)),
+          ),
+        }))
+        .filter((process) => process.ports.length > 0),
+    [groupedMemberIds, visibleProcesses],
+  );
+  const livePortKeys = useMemo(
+    () =>
+      new Set(
+        (scan?.processes ?? []).flatMap((process) =>
+          process.ports.map((port) => portViewKey(process, port)),
+        ),
+      ),
+    [scan?.processes],
   );
 
   const selectedProcesses = useMemo(
@@ -219,6 +304,71 @@ export default function App() {
     } finally {
       setStopping(false);
     }
+  }
+
+  function createProject(name: string) {
+    setProjectGroups((current) => [...current, newProjectGroup(name)]);
+    setToast({
+      tone: "success",
+      title: "Proje grubu oluşturuldu",
+      detail: `${name.trim()} grubuna artık port ekleyebilirsiniz.`,
+    });
+  }
+
+  function addPortToProject(input: AddProjectPortInput) {
+    const createdGroup = input.groupId
+      ? null
+      : newProjectGroup(input.newGroupName);
+    const groupId = input.groupId ?? createdGroup!.id;
+    const targetName =
+      createdGroup?.name ??
+      projectGroups.find((group) => group.id === groupId)?.name ??
+      "Proje";
+    setProjectGroups((current) => {
+      const next = createdGroup ? [...current, createdGroup] : current;
+      return addProjectMember(next, groupId, {
+        label: input.label,
+        protocol: input.protocol,
+        port: input.port,
+      });
+    });
+    setProjectPortDialog(null);
+    setToast({
+      tone: "success",
+      title: `${input.label.trim()} gruba eklendi`,
+      detail: `${targetName} · ${input.protocol} :${input.port}`,
+    });
+  }
+
+  function hidePort(process: ProcessPortGroup, port: PortBinding) {
+    const record = hiddenPortRecord(process, port);
+    setHiddenPorts((current) => [
+      record,
+      ...current.filter((item) => item.key !== record.key),
+    ]);
+    setCollapsedPortKeys((current) => {
+      const next = new Set(current);
+      next.delete(record.key);
+      return next;
+    });
+    setToast({
+      tone: "success",
+      title: `:${port.port} gizlendi`,
+      detail: "Portu Gizlenmiş Portlar alanından yeniden gösterebilirsiniz.",
+    });
+  }
+
+  function restorePort(key: string) {
+    setHiddenPorts((current) => current.filter((record) => record.key !== key));
+  }
+
+  function togglePortCollapsed(key: string) {
+    setCollapsedPortKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   const selectableProcesses = visibleProcesses.filter(
@@ -478,19 +628,135 @@ export default function App() {
           <div className="process-list" aria-live="polite">
             {loading && !scan ? (
               <LoadingState />
-            ) : visibleProcesses.length ? (
-              visibleProcesses.map((process) => (
-                <ProcessCard
-                  key={process.pid}
-                  process={process}
-                  selected={selected.has(process.pid)}
-                  onToggle={toggleProcess}
-                />
-              ))
             ) : (
-              <EmptyState search={search} />
+              <>
+                <ProjectGroups
+                  groups={projectGroups}
+                  processes={visibleProcesses}
+                  allProcesses={scan?.processes ?? []}
+                  selected={selected}
+                  hiddenPortKeys={hiddenPortKeys}
+                  collapsedPortKeys={collapsedPortKeys}
+                  onToggleProcess={toggleProcess}
+                  onHidePort={hidePort}
+                  onTogglePortCollapsed={togglePortCollapsed}
+                  onAddProjectPort={addPortToProject}
+                  onCreate={createProject}
+                  onRename={(groupId, name) =>
+                    setProjectGroups((current) =>
+                      renameProjectGroup(current, groupId, name),
+                    )
+                  }
+                  onDelete={(groupId) =>
+                    setProjectGroups((current) =>
+                      current.filter((group) => group.id !== groupId),
+                    )
+                  }
+                  onRemoveMember={(groupId, projectMemberId) =>
+                    setProjectGroups((current) =>
+                      removeProjectMember(
+                        current,
+                        groupId,
+                        projectMemberId,
+                      ),
+                    )
+                  }
+                  onRenameMember={(groupId, projectMemberId, label) =>
+                    setProjectGroups((current) =>
+                      renameProjectMember(
+                        current,
+                        groupId,
+                        projectMemberId,
+                        label,
+                      ),
+                    )
+                  }
+                  onRequestAddPort={(groupId) =>
+                    setProjectPortDialog({
+                      initialSelection: null,
+                      preselectedGroupId: groupId,
+                    })
+                  }
+                />
+                {ungroupedProcesses.map((process) => (
+                  <ProcessCard
+                    key={process.pid}
+                    process={process}
+                    selected={selected.has(process.pid)}
+                    onToggle={toggleProcess}
+                    projectGroups={projectGroups}
+                    onAddProjectPort={addPortToProject}
+                    hiddenPortKeys={hiddenPortKeys}
+                    collapsedPortKeys={collapsedPortKeys}
+                    onHidePort={hidePort}
+                    onTogglePortCollapsed={togglePortCollapsed}
+                  />
+                ))}
+                {!projectGroups.length && !ungroupedProcesses.length && (
+                  <EmptyState search={search} />
+                )}
+              </>
             )}
           </div>
+
+          {hiddenPorts.length > 0 && (
+            <section
+              className="hidden-ports"
+              aria-labelledby="hidden-ports-title"
+            >
+              <header>
+                <div>
+                  <EyeOff size={17} />
+                  <span>
+                    <strong id="hidden-ports-title">Gizlenmiş Portlar</strong>
+                    <small>
+                      Canlı görünümden kaldırılan {hiddenPorts.length} port
+                    </small>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHiddenPorts([])}
+                >
+                  <RotateCcw size={14} />
+                  Tümünü göster
+                </button>
+              </header>
+              <div className="hidden-port-list">
+                {hiddenPorts.map((record) => (
+                  <div
+                    className={`hidden-port-item ${
+                      livePortKeys.has(record.key)
+                        ? "is-online"
+                        : "is-offline"
+                    }`}
+                    key={record.key}
+                  >
+                    <span className="member-status" />
+                    <div>
+                      <strong>{record.processName}</strong>
+                      <small>{record.technology}</small>
+                    </div>
+                    <code>
+                      {record.protocol} :{record.port}
+                    </code>
+                    <span className="hidden-port-state">
+                      {livePortKeys.has(record.key)
+                        ? "Çalışıyor"
+                        : "Şu anda kapalı"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => restorePort(record.key)}
+                    >
+                      <RotateCcw size={13} />
+                      Tekrar göster
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <footer className="workspace-footer">
             <span>
@@ -541,6 +807,17 @@ export default function App() {
           busy={stopping}
           onCancel={() => !stopping && setConfirmOpen(false)}
           onConfirm={() => void confirmStop()}
+        />
+      )}
+
+      {projectPortDialog && (
+        <ProjectPortDialog
+          groups={projectGroups}
+          processes={scan?.processes ?? []}
+          initialSelection={projectPortDialog.initialSelection}
+          preselectedGroupId={projectPortDialog.preselectedGroupId}
+          onCancel={() => setProjectPortDialog(null)}
+          onAdd={addPortToProject}
         />
       )}
 

@@ -10,6 +10,11 @@ const processFixture: ProcessPortGroup = {
   command: "node vite --host 0.0.0.0",
   workingDirectory: "D:\\projects\\demo",
   parentChain: [{ pid: 3000, name: "Code" }],
+  technology: "React",
+  projectName: "Demo",
+  projectRoot: "D:\\projects\\demo",
+  serviceKind: "Frontend",
+  serviceDescription: "Demo projesinin Frontend bileşeni.",
   ports: [
     {
       protocol: "TCP",
@@ -23,6 +28,7 @@ const processFixture: ProcessPortGroup = {
       role: "published",
       roleReason: "Vite geliştirme sunucusu.",
       confidence: "high",
+      accessUrls: ["http://localhost:5173", "http://192.168.1.9:5173"],
     },
     {
       protocol: "TCP",
@@ -36,6 +42,7 @@ const processFixture: ProcessPortGroup = {
       role: "outbound",
       roleReason: "Aktif bağlantı.",
       confidence: "high",
+      accessUrls: [],
     },
   ],
   category: "runtime",
@@ -56,6 +63,15 @@ describe("filterProcesses", () => {
   it("finds a process by port", () => {
     expect(
       filterProcesses([processFixture], "5173", "all", "all", "all", "all"),
+    ).toHaveLength(1);
+  });
+
+  it("finds a process by technology and project purpose", () => {
+    expect(
+      filterProcesses([processFixture], "React", "all", "all", "all", "all"),
+    ).toHaveLength(1);
+    expect(
+      filterProcesses([processFixture], "Frontend", "all", "all", "all", "all"),
     ).toHaveLength(1);
   });
 

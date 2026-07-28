@@ -137,6 +137,11 @@ export function filterProcesses(
       const searchable = [
         process.displayName,
         process.processName,
+        process.technology,
+        process.projectName ?? "",
+        process.projectRoot ?? "",
+        process.serviceKind,
+        process.serviceDescription,
         process.pid.toString(),
         process.executablePath ?? "",
         process.command ?? "",
@@ -154,6 +159,7 @@ export function filterProcesses(
           port.state,
           roleLabel(port.role),
           port.roleReason,
+          ...port.accessUrls,
         ]),
       ]
         .join(" ")

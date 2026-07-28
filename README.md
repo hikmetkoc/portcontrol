@@ -30,6 +30,18 @@ birbirinden ayırmaya yardımcı olur.
 Hazır paketler [GitHub Releases](https://github.com/hikmetkoc/portcontrol/releases/latest)
 sayfasında yayımlanır.
 
+### v0.3.0 öne çıkanlar
+
+- Java Spring Boot, Java, Rust, Angular, React, Vue, Tauri, .NET, Python,
+  JavaScript ve Flutter projeleri için daha ayrıntılı teknoloji/proje tanıma
+- Kullanıcı tanımlı proje gruplarıyla frontend, backend, veritabanı ve diğer
+  portları canlı ağ görünümünde tek çerçevede toplama
+- Portları tek tek küçültme, gizleme ve **Gizlenmiş Portlar** alanından geri
+  getirme
+- PID, kaynak tüketimi, port amacı ve yerel ağ erişim adresleri için daha
+  okunabilir ve renklerle ayrıştırılmış görünüm
+- Yayındaki HTTP adreslerini doğrudan varsayılan tarayıcıda açma
+
 | İşletim sistemi | Mimari | Paketler | Önerilen |
 | --- | --- | --- | --- |
 | Windows 10/11 | x64 | `.exe`, `.msi` | NSIS `.exe` kurucusu |

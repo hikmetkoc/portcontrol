@@ -1,6 +1,6 @@
 [package]
 name = "portcontrol"
-version = "0.2.0"
+version = "0.3.0"
 description = "Cross-platform local port and development service manager"
 authors = ["PortControl contributors"]
 edition = "2024"
@@ -16,8 +16,10 @@ tauri-build = { version = "2.6.3", features = [] }
 [dependencies]
 netstat2 = "0.11.2"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sysinfo = "0.37.2"
 tauri = { version = "2.11.5", features = [] }
+tauri-plugin-opener = "2"
 thiserror = "2"
 
 [profile.release]

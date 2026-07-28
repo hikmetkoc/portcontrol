@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "PortControl ana pencere izinleri",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "opener:default"]
 }
