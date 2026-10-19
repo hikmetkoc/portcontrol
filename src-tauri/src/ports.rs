@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use sysinfo::{Pid, ProcessesToUpdate, Signal, System};
 use thiserror::Error;
 
+use crate::runner::{ManagedProcess, runner};
+
 static PROCESS_SAMPLER: OnceLock<Mutex<ProcessSampler>> = OnceLock::new();
 
 #[derive(Debug, Error)]
@@ -116,6 +118,9 @@ pub struct ProcessPortGroup {
     disk_total_written_bytes: u64,
     metrics_ready: bool,
     started_at: u64,
+    managed_run_id: Option<String>,
+    managed_app_id: Option<String>,
+    managed_project_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -124,7 +129,7 @@ pub struct ScanResponse {
     processes: Vec<ProcessPortGroup>,
     scanned_at: u128,
     total_sockets: usize,
-    hidden_system_processes: usize,
+    filtered_processes: usize,
     inaccessible_sockets: usize,
     platform: &'static str,
     permission_notice: Option<String>,
@@ -152,8 +157,11 @@ struct SocketGroup {
     binding_keys: HashSet<String>,
 }
 
-#[tauri::command]
-pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError> {
+/// Yalnızca yazılım geliştirme projelerine ait dinleme portlarını döndürür.
+/// Sistem, güvenlik ve IDE iç servisleri listeye hiç alınmaz; PortControl'ün
+/// başlattığı süreçler ise her zaman gösterilir ve çalıştırma kaydıyla eşlenir.
+#[tauri::command(async)]
+pub fn scan_ports(include_infrastructure: bool) -> Result<ScanResponse, PortControlError> {
     let address_flags = AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6;
     let protocol_flags = ProtocolFlags::TCP | ProtocolFlags::UDP;
     let socket_infos = get_sockets_info(address_flags, protocol_flags)
@@ -231,9 +239,10 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
         .and_then(|process| process.user_id())
         .cloned();
     let local_addresses = discover_local_addresses();
+    let managed_roots = runner().managed_roots();
 
     let mut processes = Vec::with_capacity(grouped.len());
-    let mut hidden_system_processes = 0;
+    let mut filtered_processes = 0;
 
     for (pid_value, mut socket_group) in grouped {
         let pid = Pid::from_u32(pid_value);
@@ -262,6 +271,8 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
             executable_path.as_deref(),
             command.as_deref(),
         );
+        let original_category = identity.category;
+        let managed = find_managed_ancestor(system, pid, &managed_roots);
         if project.recognized {
             identity.category = "development";
             identity.known_developer_tool = true;
@@ -283,9 +294,21 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
         );
         let protected = protection_reason.is_some();
 
-        if protected && !include_system {
-            hidden_system_processes += 1;
-            continue;
+        if managed.is_none() {
+            let installed_app = project
+                .project_root
+                .as_deref()
+                .is_some_and(is_installed_application_root);
+            let development = (project.recognized || original_category == "development")
+                && !installed_app
+                && original_category != "editor"
+                && !identity.security_tool;
+            let infrastructure =
+                include_infrastructure && matches!(original_category, "database" | "container");
+            if protected || !(development || infrastructure) {
+                filtered_processes += 1;
+                continue;
+            }
         }
 
         let classification_context = build_classification_context(
@@ -300,6 +323,7 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
         let mut bindings = socket_group
             .bindings
             .drain(..)
+            .filter(|binding| binding.protocol == "TCP" && binding.activity == "listener")
             .map(|binding| {
                 let role = classify_socket(&binding, &identity, &classification_context, protected);
                 let access_urls = access_urls_for(&binding, role.role, &project, &local_addresses);
@@ -318,7 +342,16 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
                     access_urls,
                 }
             })
+            .filter(|binding| {
+                managed.is_some()
+                    || matches!(binding.role, "published" | "infrastructure" | "unknown")
+            })
             .collect::<Vec<_>>();
+
+        if bindings.is_empty() {
+            filtered_processes += 1;
+            continue;
+        }
 
         bindings.sort_by(|left, right| {
             activity_priority(left.activity)
@@ -377,6 +410,9 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
             disk_total_written_bytes: disk_usage.total_written_bytes,
             metrics_ready,
             started_at: process.map(|item| item.start_time()).unwrap_or(0),
+            managed_run_id: managed.map(|item| item.run_id.clone()),
+            managed_app_id: managed.map(|item| item.app_id.clone()),
+            managed_project_id: managed.map(|item| item.project_id.clone()),
         });
     }
 
@@ -406,7 +442,7 @@ pub fn scan_ports(include_system: bool) -> Result<ScanResponse, PortControlError
             .unwrap_or_default()
             .as_millis(),
         total_sockets,
-        hidden_system_processes,
+        filtered_processes,
         inaccessible_sockets,
         platform: std::env::consts::OS,
         permission_notice,
@@ -860,6 +896,17 @@ fn classify_socket(
         };
     }
 
+    // Bağlamın ilk satırı sürecin kendi komutudur; dil sunucusu veya derleme
+    // daemon'u gibi araç süreçleri proje klasöründe çalışsa bile ayrılır.
+    let own_context = context.split('\n').next().unwrap_or(context);
+    if has_tool_internal_marker(own_context) {
+        return SocketClassification {
+            role: "toolInternal",
+            reason: "Komut satırı bunun IDE/derleme aracı yardımcı süreci olduğunu gösteriyor.",
+            confidence: "high",
+        };
+    }
+
     if has_project_server_marker(context) {
         return SocketClassification {
             role: "published",
@@ -1022,12 +1069,13 @@ fn build_classification_context(
     command: Option<&str>,
     working_directory: Option<&str>,
 ) -> String {
-    let mut parts = vec![
-        process_name.to_string(),
-        executable.unwrap_or_default().to_string(),
-        command.unwrap_or_default().to_string(),
-        working_directory.unwrap_or_default().to_string(),
-    ];
+    let mut parts = vec![format!(
+        "{} {} {}\n{}",
+        process_name,
+        executable.unwrap_or_default(),
+        command.unwrap_or_default(),
+        working_directory.unwrap_or_default()
+    )];
     let mut visited = HashSet::new();
     let mut next = system.process(pid).and_then(|process| process.parent());
 
@@ -1113,6 +1161,21 @@ fn has_tool_internal_marker(context: &str) -> bool {
             "crashpad-handler",
             "remoteagent",
             "language-server",
+            "languageserver",
+            "langserver",
+            "tsserver",
+            "typingsinstaller",
+            "eslintserver",
+            "rust-analyzer",
+            "jdtls",
+            "org.gradle.launcher.daemon",
+            "gradledaemon",
+            "kotlin-daemon",
+            "kotlincompiledaemon",
+            "--clientprocessid",
+            "js-debug",
+            "debugadapter",
+            "copilot",
         ],
     )
 }
@@ -1215,6 +1278,57 @@ fn process_role_priority(process: &ProcessPortGroup) -> u8 {
     } else {
         3
     }
+}
+
+fn find_managed_ancestor<'a>(
+    system: &System,
+    pid: Pid,
+    managed_roots: &'a HashMap<u32, ManagedProcess>,
+) -> Option<&'a ManagedProcess> {
+    if managed_roots.is_empty() {
+        return None;
+    }
+    let mut visited = HashSet::new();
+    let mut current = Some(pid);
+    while let Some(candidate) = current {
+        if let Some(managed) = managed_roots.get(&candidate.as_u32()) {
+            return Some(managed);
+        }
+        if visited.len() >= 12 || !visited.insert(candidate.as_u32()) {
+            break;
+        }
+        current = system
+            .process(candidate)
+            .and_then(|process| process.parent());
+    }
+    None
+}
+
+/// Kurulu uygulamaların paket klasörleri geliştirme projesi sayılmaz.
+fn is_installed_application_root(root: &Path) -> bool {
+    let path = root.to_string_lossy().replace('\\', "/").to_lowercase();
+    [
+        "/program files",
+        "/programdata/",
+        "/windows/",
+        "/appdata/local/programs/",
+        "/appdata/roaming/",
+        "/.vscode/",
+        "/.vscode-server/",
+        "/.cursor/",
+        "/.windsurf/",
+        "/.nvm/",
+        "/.npm/",
+        "/.cargo/registry/",
+        "/node_modules/",
+        "/applications/",
+        "/usr/lib/",
+        "/usr/share/",
+        "/opt/",
+        "/snap/",
+    ]
+    .iter()
+    .any(|marker| path.contains(marker))
 }
 
 fn matches_any(value: &str, needles: &[&str]) -> bool {
@@ -1500,6 +1614,12 @@ fn format_url(scheme: &str, address: &str, port: u16) -> String {
     } else {
         format!("{scheme}://{address}:{port}")
     }
+}
+
+/// Bu bilgisayarın yerel ağdaki IP adresleri (QR kodlu ağ bağlantıları için).
+#[tauri::command(async)]
+pub fn lan_addresses() -> Vec<String> {
+    discover_local_addresses()
 }
 
 fn discover_local_addresses() -> Vec<String> {

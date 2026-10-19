@@ -79,6 +79,23 @@ jobs:
         if: runner.os == 'macOS'
         run: echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
 
+      - name: Prepare release notes
+        id: notes
+        shell: bash
+        run: |
+          notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            if [ -f "$notes" ]; then
+              cat "$notes"
+            else
+              echo "Windows, Linux ve macOS kurulum paketleri bu sürümün varlıklarında yer alır."
+            fi
+            echo
+            echo "Kurulum, imza uyarıları ve kullanım ayrıntıları için README dosyasına bakın."
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and publish
         uses: tauri-apps/tauri-action@v1
         env:
@@ -86,10 +103,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: PortControl v__VERSION__
-          releaseBody: |
-            Windows, Linux ve macOS kurulum paketleri bu sürümün varlıklarında yer alır.
-
-            Kurulum, imza uyarıları ve kullanım ayrıntıları için README dosyasına bakın.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseCommitish: ${{ github.sha }}
           releaseDraft: false
           prerelease: false

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PortControl",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "identifier": "com.portcontrol.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -14,13 +14,15 @@
       {
         "label": "main",
         "title": "PortControl",
-        "width": 1280,
-        "height": 820,
-        "minWidth": 760,
-        "minHeight": 600,
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 640,
         "center": true,
-        "decorations": true,
-        "resizable": true
+        "decorations": false,
+        "resizable": true,
+        "shadow": true,
+        "backgroundColor": "#05060d"
       }
     ],
     "security": {
@@ -30,8 +32,8 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "shortDescription": "Yerel port ve geliştirme servisi yöneticisi",
-    "longDescription": "Geliştirme araçlarının açtığı yerel portları görüntüler, kullanım amaçlarını sınıflandırır ve ilgili süreçleri güvenle durdurur.",
+    "shortDescription": "Neon geliştirme projesi ve port komuta merkezi",
+    "longDescription": "Geliştirme projelerinin açtığı portları canlı izler, çalışma klasöründeki frontend/backend uygulamalarını tespit eder, tek tıkla ayağa kaldırır ve loglarını gösterir.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

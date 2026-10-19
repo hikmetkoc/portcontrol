@@ -3,7 +3,7 @@
 
 # PortControl
 
-**Bilgisayarınızdaki portları hangi uygulamanın, neden açtığını görün ve ilgili süreci güvenle durdurun.**
+**Geliştirme projelerini tek tıkla ayağa kaldırın; açık portlarını radarda, loglarını canlı konsolda izleyin.**
 
 [![CI](https://github.com/hikmetkoc/portcontrol/actions/workflows/ci.yml/badge.svg)](https://github.com/hikmetkoc/portcontrol/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/hikmetkoc/portcontrol?display_name=tag)](https://github.com/hikmetkoc/portcontrol/releases/latest)
@@ -14,11 +14,12 @@
 
 </div>
 
-PortControl; Windows, Linux ve macOS üzerinde çalışan, açık TCP/UDP uç noktalarını
-port sahibi süreçlerle eşleştiren açık kaynaklı bir Tauri 2 masaüstü
-uygulamasıdır. VS Code veya IntelliJ'ın kendi yardımcı servisleriyle gerçekten
-yayına alınmış Vite, Spring Boot, .NET, Python ve benzeri geliştirme sunucularını
-birbirinden ayırmaya yardımcı olur.
+PortControl; Windows, Linux ve macOS üzerinde çalışan, kod yazdırmayan bir "geliştirme
+IDE'si" gibi tasarlanmış açık kaynaklı bir Tauri 2 masaüstü uygulamasıdır. Çalışma
+klasörünüzü proje olarak eklediğinizde içindeki tüm frontend, backend ve altyapı
+uygulamalarını bulur, varsayılan ya da seçtiğiniz portta başlatır ve çıktılarını renkli
+bir konsolda akıtır. Port radarı ise yalnızca yazılım geliştirme projelerinin açtığı
+portları gösterir; sistem, güvenlik ve IDE iç servisleri listeye hiç girmez.
 
 > [!IMPORTANT]
 > PortControl bir portu tek başına kapatamaz. Portu kapatmak için o portun sahibi
@@ -30,17 +31,33 @@ birbirinden ayırmaya yardımcı olur.
 Hazır paketler [GitHub Releases](https://github.com/hikmetkoc/portcontrol/releases/latest)
 sayfasında yayımlanır.
 
-### v0.3.0 öne çıkanlar
+### v0.4.0 öne çıkanlar
 
-- Java Spring Boot, Java, Rust, Angular, React, Vue, Tauri, .NET, Python,
-  JavaScript ve Flutter projeleri için daha ayrıntılı teknoloji/proje tanıma
-- Kullanıcı tanımlı proje gruplarıyla frontend, backend, veritabanı ve diğer
-  portları canlı ağ görünümünde tek çerçevede toplama
-- Portları tek tek küçültme, gizleme ve **Gizlenmiş Portlar** alanından geri
-  getirme
-- PID, kaynak tüketimi, port amacı ve yerel ağ erişim adresleri için daha
-  okunabilir ve renklerle ayrıştırılmış görünüm
-- Yayındaki HTTP adreslerini doğrudan varsayılan tarayıcıda açma
+- Tamamen yenilenen neon komuta merkezi arayüzü: özel pencere çubuğu, etkinlik
+  çubuğu, proje gezgini, alt konsol paneli ve durum çubuğu
+- **Projeler:** çalışma klasörü eklenir, içindeki ayağa kaldırılabilir uygulamalar
+  otomatik tespit edilir ve tek tıkla başlatılır/durdurulur/yeniden başlatılır
+- Varsayılan portta ya da **özel portta** başlatma; port çakışmasını başlatmadan önce
+  yakalama ve en yakın boş portu önerme
+- **Fırlatma sekansı:** projedeki tüm uygulamaları altyapı → backend → frontend
+  sırasıyla başlatır, dolu portları otomatik kaydırır
+- **Canlı konsol:** ANSI renkleri, hata/uyarı vurgusu, arama, tıklanabilir adresler,
+  zaman damgaları ve çalışan sürece stdin girdisi gönderme
+- **Port radarı:** yalnızca geliştirme projelerinin dinlediği portlar; isteğe bağlı
+  altyapı (veritabanı/Docker) görünümü
+- **Olay akışı:** açılan/kapanan portlar ile başlatma, hazır olma ve çökme olaylarının
+  zaman çizelgesi
+- `Ctrl+K` komut paleti, sistem haritası, CPU/RAM mini grafikleri ve hazır bildirimleri
+- **Bağımlılık zinciri:** yapılandırmadan bağımlılıkları bulur, sırayla başlatır ve
+  sağlık kontrolüyle hazır olmalarını bekler
+- **Ortam profilleri ve `.env` düzenleyici**, Spring/.NET profil seçimi
+- **Çökme bekçisi:** çökme nedenini özetler, isteğe bağlı otomatik yeniden başlatır
+- Ağdaki uygulamalar için **telefonda aç (QR)**
+- **Sorunlar görünümü:** konsoldaki hata ve uyarılar uygulama bazında, stack trace'lerle
+  gruplanmış ve tekrarları birleştirilmiş olarak listelenir
+- **Matrix ekran koruyucu** (`Ctrl+Shift+L`, macOS'ta `⌘⌥L`); boşta kalınca da açılabilir
+- Java/Maven çıktısı terminaldeki gibi UTF-8 okunur, stdout/stderr gerçek sırasıyla
+  gösterilir; 50.000 satır geçmiş ve logu dosyaya kaydetme
 
 | İşletim sistemi | Mimari | Paketler | Önerilen |
 | --- | --- | --- | --- |
@@ -56,22 +73,98 @@ Paketler henüz ticari bir kod imzalama sertifikasıyla imzalanmamaktadır:
 - AppImage için dosyayı çalıştırılabilir yapmak gerekebilir:
   `chmod +x PortControl*.AppImage`.
 
-## Neler gösterir?
+## Projeler ve uygulama tespiti
 
-- TCP `LISTEN`, `ESTABLISHED`, `SYN_SENT`, `CLOSE_WAIT` ve diğer canlı bağlantı
-  durumları
-- Bir sürecin bağladığı UDP `BOUND` uçları
-- Portun sahibi olan PID, uygulama adı ve çalıştırılabilir dosyanın tam yolu
-- Komut satırı, çalışma dizini ve süreci başlatan üst süreç zinciri
-- Süreç bazında CPU, RAM, disk okuma/yazma hızı ve toplam disk aktarımı
-- Portun yalnızca bu bilgisayara mı, yerel ağa mı, yoksa tüm ağ arayüzlerine mi
-  açık olduğu
-- Sınıflandırma gerekçesi ve yüksek/orta/düşük güven seviyesi
+Yeni proje oluştururken seçilen klasör (en fazla 6 seviye derinliğe kadar) taranır.
+`node_modules`, `target`, `dist`, `build`, `bin`, `obj`, sanal ortamlar ve gizli
+klasörler atlanır. Tespit edilen her uygulama için framework, dil, paket yöneticisi,
+varsayılan port ve portun nereden okunduğu gösterilir.
 
-Kaynak tüketimi işletim sistemleri tarafından port başına değil **süreç başına**
-raporlandığı için CPU, RAM ve disk değerleri uygulama kartında gösterilir. İlk
-taramada CPU ve disk hızı “ölçülüyor” görünebilir; sonraki otomatik yenilemede
-iki örnek arasındaki fark hesaplanır.
+| Ekosistem | Tespit edilenler | Varsayılan port kaynağı | Özel port nasıl aktarılır? |
+| --- | --- | --- | --- |
+| Node.js | Vite (+React/Vue/Svelte/Solid), Next.js, Nuxt, Angular, SvelteKit, Astro, Remix, CRA, Vue CLI, Gatsby, NestJS, Express, Fastify, Koa, Hono, Electron, Tauri | betik parametresi, `vite.config.*`, `angular.json`, `.env`, `listen(...)` | `--port` / `-p` CLI parametresi veya `PORT` |
+| JVM | Spring Boot, Quarkus, Micronaut (Maven / Gradle, wrapper desteğiyle) | `application.properties` / `application.yml` | `SERVER_PORT` vb. ortam değişkeni |
+| .NET | ASP.NET Core, Blazor | `Properties/launchSettings.json` | `--urls http://localhost:PORT` |
+| Python | Django, FastAPI, Flask, Streamlit (`.venv` otomatik) | framework varsayılanı / kaynak kod | CLI parametresi |
+| Diğer | Go (Gin, Echo, Fiber, Chi), Rust (Axum, Actix, Rocket…), Laravel/PHP, Rails/Rack, Flutter Web | kaynak kod / framework varsayılanı | CLI parametresi veya `PORT` |
+| Altyapı | Docker Compose | `ports:` eşlemeleri | sabit |
+
+Her uygulamanın betiği seçilebilir (`dev`, `start`, `watch`…), komutu düzenlenebilir
+ve varsayılana döndürülebilir. `node_modules` eksikse kart üzerinden bağımlılıklar
+kurulabilir. PortControl'ün başlattığı süreçler uygulama kapanırken süreç ağacıyla
+birlikte sonlandırılır.
+
+## Bağımlılık zinciri ve sağlık kontrolü
+
+Tespit sırasında yapılandırma dosyalarındaki yerel adresler okunur: Angular/Webpack
+proxy hedefleri (`proxy.conf.json`), `.env` değişkenleri, `vite.config.*`,
+`environment.ts`, Spring `application*.yml|properties`, `appsettings*.json` ve
+Python yapılandırmaları. Adres projedeki bir uygulamanın portuna denk gelirse
+bağımlılık olarak bağlanır (ör. `client → api`). Port tutmuyor ama anahtar adı
+uygulamayı işaret ediyorsa (`app.mpai.base-url` → `mpai`) yine bağlanır ve kartta
+"bu servis :8010 portunda bekleniyor" uyarısı çıkar. CORS izinleri ve e-posta
+bağlantı tabanı gibi anahtarlar bağımlılık sayılmaz. Projede olmayan servisler
+(PostgreSQL, Redis, Elasticsearch…) harici gereksinim olarak listelenir.
+
+- **Zincirle başlatma:** "Tümünü başlat" ve karttaki "Zinciriyle" düğmesi,
+  bağımlılıkları sırayla başlatır ve her birinin hazır olmasını bekler. Birbirinden
+  bağımsız uygulamalar paralel başlar; fırlatma sekansı paneli adımları canlı gösterir.
+- **Sağlık kontrolü:** Spring Actuator (`management.endpoints.web.base-path`
+  dahil), FastAPI/Flask `/health` rotaları, .NET `MapHealthChecks` ve frontend dev
+  sunucuları otomatik tanınır. 500'ün altındaki her HTTP yanıtı sağlıklı sayılır;
+  yol yoksa TCP bağlantısı denetlenir. Çalışan kartlarda gecikmesiyle birlikte gösterilir.
+- **Sistem haritası:** bağımlılık okları canlıyken veri akışı animasyonu gösterir,
+  port uyuşmazlığında amber kesikli çizgiye döner.
+
+## Ortam profilleri ve .env düzenleyici
+
+- Uygulama başına adlandırılmış ortam profilleri ("Yerel", "Test DB" gibi); etkin
+  profilin değişkenleri başlatmada sürece aktarılır. Şifre/token gibi anahtarlar maskelenir.
+- Spring (`SPRING_PROFILES_ACTIVE`), .NET (`ASPNETCORE_ENVIRONMENT`), Quarkus ve
+  Micronaut profilleri tespit edilen dosyalardan seçilebilir.
+- Uygulama klasöründeki `.env` dosyaları yorumlar, sıra ve tırnak stili korunarak
+  düzenlenir; yalnızca `.env*` adlı dosyalara yazılabilir.
+
+## Konsol ve Sorunlar
+
+- PortControl'ün başlattığı süreçlerin stdout ve stderr çıktısı tek akıştan, terminaldeki
+  sırasıyla okunur. Java süreçlerine `-Dstdout.encoding=UTF-8` eklenir; böylece Windows'ta
+  borudan okunan çıktıda Türkçe karakterler bozulmaz. Eklenen ortam değişkenleri her
+  çalıştırmanın ilk satırında yazılır.
+- Son 50.000 satır saklanır; konsol son 3.000 satırı çizer, eski satırlar isteğe bağlı açılır.
+  Log, renk kodları temizlenmiş olarak dosyaya kaydedilebilir.
+- Loglardaki etkin profil (Spring `The following profiles are active`, .NET ortamı) konsol
+  başlığında gösterilir.
+- **Sorunlar** görünümü (`Ctrl+4`) hata ve uyarıları log seviyesine göre ayırır, Java stack
+  trace'lerini ve Python traceback'lerini tek soruna gruplar, tekrarları `×N` olarak birleştirir
+  ve konsoldaki satıra atlar.
+
+## Çökme bekçisi ve çökme analizi
+
+Çöken sürecin logundan neden özeti çıkarılır: Spring "APPLICATION FAILED TO START"
+açıklaması ve önerisi, Java `Caused by` kök nedeni, Python traceback, eksik Node
+modülü, bulunamayan komut, port çakışması, derleme hatası ve bağlantı reddi. Kartta
+ve konsolda gösterilir; "hata satırına git" ilgili log satırını vurgular. Bekçi
+açıksa uygulama 2 sn, 5 sn ve 10 sn arayla en fazla 3 kez yeniden başlatılır.
+
+## Telefonda aç (QR)
+
+Ağa açık (`0.0.0.0`) dinleyen uygulamalar için yerel ağ adresinin QR kodu
+gösterilir. Uygulama yalnızca `localhost`'a bağlıysa framework'e göre ağa açma
+ipucu verilir (ör. Angular `--host=0.0.0.0`, Vite `--host`).
+
+## Port radarı neyi gösterir?
+
+- Yalnızca yazılım geliştirme projelerine ait TCP `LISTEN` portları
+- PortControl'ün başlattığı süreçler ve dışarıdan (VS Code, IntelliJ, terminal)
+  başlatılan geliştirme sunucuları ayrı etiketlenir
+- Portun yalnızca yerel mi yoksa ağa açık mı olduğu, yerel erişim adresi
+- Süreç bazında CPU, RAM ve çalışma süresi
+
+Sistem süreçleri, antivirüs/güvenlik yazılımları, editörlerin dil sunucuları ve
+eklenti servisleri, derleme daemon'ları, aktif (`ESTABLISHED`) bağlantılar ve UDP
+uçları radara alınmaz. Veritabanı ve Docker gibi altyapı servisleri isteğe bağlı
+olarak **Altyapı** anahtarıyla gösterilebilir.
 
 ## Port amacı nasıl ayrılır?
 
@@ -92,14 +185,12 @@ Sınıflandırma kanıta dayalı bir tahmindir. Port sahibi ve soket durumu işl
 sisteminden doğrudan alınır; “neden açıldı?” bilgisi ise her zaman işletim
 sistemleri tarafından sunulmadığı için gerekçe ve güven seviyesiyle gösterilir.
 
-### LISTEN, ESTABLISHED ve UDP BOUND farkı
+### LISTEN ve diğer durumlar
 
 - **TCP LISTEN:** Süreç gelen bağlantıları kabul etmek için gerçek bir sunucu ucu
-  açmıştır.
-- **TCP ESTABLISHED:** İki uç arasında aktif bağlantı vardır. Yerel taraftaki
-  geçici port, yayına alınmış bir servis değildir.
-- **UDP BOUND:** Süreç UDP portunu ayırmıştır. UDP'de TCP'deki gibi `LISTEN`
-  durumu olmadığından bu bilgi tek başına servis yayını anlamına gelmez.
+  açmıştır. Radar yalnızca bu uçları gösterir.
+- **TCP ESTABLISHED / UDP BOUND:** Aktif bağlantı ya da ayrılmış UDP portu yayın
+  portu anlamına gelmediği için listelenmez.
 
 ## Güvenlik yaklaşımı
 
@@ -116,14 +207,15 @@ varsayılan görünümde gizlenir ve uygulama içinden durdurulamaz. Başka kull
 veya sistem hesabına ait süreçler için yönetici/root yetkisi gerekebilir;
 PortControl kendiliğinden yetki yükseltmez.
 
-## Filtreler
+## Kısayollar
 
-- Uygulama, süreç, PID veya port numarasıyla arama
-- TCP/UDP protokolü
-- `LISTEN`, aktif TCP bağlantıları ve UDP `BOUND`
-- Yayındaki proje, IDE içi servis, altyapı, sistem veya belirsiz amaç
-- Uygulama kategorisi
-- Sistem/güvenlik süreçlerini gösterme veya gizleme
+| Kısayol | İşlem |
+| --- | --- |
+| `Ctrl+K` | Komut paleti (başlat, durdur, projeye git, port aç…) |
+| `Ctrl+N` | Yeni proje |
+| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` / `Ctrl+4` | Port radarı / Projeler / Olay akışı / Sorunlar |
+| `Ctrl+Shift+L` (macOS: `⌘⌥L`) | Ekran koruyucuyu aç / kapat |
+| `Ctrl+\`` | Konsolu aç/kapat |
 
 ## Geliştirme
 
@@ -141,14 +233,16 @@ npm ci
 npm run tauri dev
 ```
 
-Yalnızca arayüzü örnek verilerle tarayıcıda çalıştırmak için:
+Yalnızca arayüzü örnek verilerle (sahte port taraması, proje tespiti ve süreç
+çalıştırıcı) tarayıcıda çalıştırmak için:
 
 ```bash
 npm run dev
 ```
 
-Gerçek port taraması ve süreç durdurma komutları yalnızca Tauri masaüstü
-penceresinde çalışır.
+Gerçek port taraması, klasör tespiti ve süreç başlatma/durdurma yalnızca Tauri
+masaüstü penceresinde çalışır. Windows'ta Rust derlemesi için Visual Studio
+Build Tools'un "C++ ile masaüstü geliştirme" iş yükü gerekir.
 
 ### Test ve derleme
 
@@ -170,6 +264,8 @@ kurulum paketleri otomatik olarak aynı GitHub Release kaydına yüklenir.
 - React 19, TypeScript ve Vite arayüzü
 - `netstat2` ile soket/PID eşleştirme
 - `sysinfo` ile süreç ağacı ve kaynak ölçümleri
+- Kabuk üzerinden süreç başlatan, stdout/stderr akışını olay olarak ileten çalıştırıcı
+- `tauri-plugin-dialog` ile klasör seçimi
 - Vitest ve Rust birim/entegrasyon testleri
 
 ## Sınırlamalar
@@ -180,6 +276,12 @@ kurulum paketleri otomatik olarak aynı GitHub Release kaydına yüklenir.
   Docker/VM altyapı süreci olarak görünebilir.
 - Amaç sınıflandırması yeni veya tanınmayan araçlarda “Belirsiz” kalabilir.
 - Bir sürecin durdurulması, o sürece ait tüm portları ve etkin işleri kapatır.
+- Proje tespiti manifest dosyalarına dayalı bir tahmindir; alışılmadık yapılarda
+  komutu kart üzerinden düzenleyebilirsiniz.
+- Uygulama portu kodda sabitlenmişse ve `PORT` gibi bir değişkeni okumuyorsa özel
+  port ayarı etkisiz kalabilir.
+- `docker compose up` durdurulduğunda konteynerler çalışmaya devam edebilir; tamamen
+  kapatmak için `down` betiğini kullanın.
 
 ## Katkı ve lisans
 
